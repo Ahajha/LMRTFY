@@ -32,7 +32,7 @@ public:
 	Creates a thread pool with a given number of threads. Default attempts to use all threads
 	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
 	*/
-	thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
+	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
 	
 	/*!
 	Waits for all tasks in the queue to be finished, then stops.
