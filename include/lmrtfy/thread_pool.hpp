@@ -1,9 +1,12 @@
 #pragma once
 
 #include <type_traits>
+#include <condition_variable>
 #include <future>
 #include <vector>
 #include <thread>
+#include <queue>
+#include <mutex>
 #include "function2/function2.hpp"
 
 #ifdef __cpp_concepts
@@ -79,10 +82,61 @@ public:
 private:
 	std::vector<std::thread> threads;
 	
-	// Number of currently idle threads. Required to avoid an edge case that can cause worker
-	// threads to return early even while there is still work being done by other threads.
-	// (this is important in case that work happens to spawn more sub-tasks).
+	// Number of currently idle threads. Required to ensure the threads are "all-or-nothing",
+	// that is, threads will only stop if they know all other threads will stop.
 	std::size_t n_idle_;
+	
+	/*
+	I would like to just implement the queue directly in the thread_pool class as
+	std::queue<fu2::unique_function<std::conditional_t
+		<std::is_void_v<thread_id_t>, void(), void(thread_id_t)>
+	>> tasks;
+	, however the evaluation of "void(thread_id_t)" when thread_id_t = void is invalid, which
+	is bothersome because it is only an error in the situation that it isn't used anyways.
+	To circumvent this without providing an entire separate specialization or
+	adding extra classes visible outside this one, this struct is *partially* specialized
+	with void, following the example here: https://stackoverflow.com/questions/33758287/
+	The second parameter here is a dummy, to avoid it being a full specialization.
+	*/
+	template<class T, int _ = 0>
+	struct task_queue;
+	
+	task_queue<thread_id_t> tasks;
+	
+	// Queue of tasks to be completed. fu2::unique_function is used to allow non-copyable
+	// types to be inserted.
+	//task_queue<thread_id_t> tasks;
+	
+	// Initially set to running, set to stopping when the destructor is called, then set to
+	// stopped once all threads are idle and there is no more work to be done.
+	enum class pool_state : uint8_t
+	{
+		running, stopping, stopped
+	} state;
+	
+	// Used for waking up threads when new tasks are available or the pool is stopping.
+	// Note that according to
+	// https://en.cppreference.com/w/cpp/thread/condition_variable/notify_one
+	// , signals shouldn't need to be guarded by holding a mutex.
+	std::condition_variable signal;
+	
+	// Used for atomic operations on the task queue. Any modifications done to the
+	// thread pool are done while holding this mutex.
+	std::mutex mut;
+};
+
+template<class T>
+template<class U, int _>
+struct thread_pool<T>::task_queue
+{
+	std::queue<fu2::unique_function<void(T)>> queue;
+};
+
+template<class T>
+template<int _>
+struct thread_pool<T>::task_queue<void,_>
+{
+	std::queue<fu2::unique_function<void()>> queue;
 };
 
 }
