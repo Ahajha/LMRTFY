@@ -139,4 +139,106 @@ struct thread_pool<T>::task_queue<void,_>
 	std::queue<fu2::unique_function<void()>> queue;
 };
 
+template<class thread_id_t>
+#ifdef __cpp_concepts
+	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
+#endif
+thread_pool<thread_id_t>::thread_pool(std::size_t n_threads) :
+	n_idle_(0), state(pool_state::running)
+{
+	// If thread_id_t is void, use std::size_t as the fallback type to be captured.
+	// This will end up getting ignored, so it just needs to have a compatible type.
+	using id_t = std::conditional_t<std::is_void_v<thread_id_t>,std::size_t,thread_id_t>;
+	
+	threads.reserve(n_threads);
+	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
+	{
+		// Main loop for the threads
+		threads.emplace_back([this, thread_id = static_cast<id_t>(thread_id)]
+		{
+			std::unique_lock mutex_lock(mut);
+			
+			while (true)
+			{
+				// Try to get a task
+				if (tasks.queue.empty())
+				{
+					// No tasks, this thread is now idle.
+					++n_idle_;
+					
+					// If this was the last worker running and the pool is stopping, wake
+					// up all other threads, who are waiting for the others to finish.
+					if (n_idle_ == size() && state == pool_state::stopping)
+					{
+						state = pool_state::stopped;
+						
+						// Minor optimization, unlock now instead of having it release
+						// automatically. This also allows the notification to not require
+						// the lock. We also must return now, since it can't be woken up later.
+						mutex_lock.unlock();
+						signal.notify_all();
+						return;
+					}
+					
+					// Wait for a signal (wait unlocks and relocks the mutex). A signal is
+					// sent when a new task comes in, the last worker finishes the last task,
+					// or the threads are told to stop.
+					signal.wait(mutex_lock);
+					
+					if (state == pool_state::stopped) return;
+					
+					--n_idle_;
+				}
+				else
+				{
+					// Grab the next task and run it.
+					auto task = std::move(tasks.queue.front());
+					tasks.queue.pop();
+					
+					mutex_lock.unlock();
+					
+					if constexpr (std::is_void_v<thread_id_t>)
+					{
+						// (Silence potential warnings about unused captures)
+						(void)thread_id;
+						task();
+					}
+					else
+					{
+						task(thread_id);
+					}
+					
+					mutex_lock.lock();
+				}
+			}
+		});
+	}
+}
+
+template<class thread_id_t>
+#ifdef __cpp_concepts
+	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
+#endif
+thread_pool<thread_id_t>::~thread_pool()
+{
+	// Give the waiting threads a command to finish.
+	{
+		std::lock_guard lock(mut);
+		
+		state = (n_idle_ == size() && tasks.queue.empty())
+			? pool_state::stopped
+			: pool_state::stopping;
+	}
+	
+	// Signal everyone in case any have gone to sleep.
+	signal.notify_all();
+	
+	// Wait for the computing threads to finish.
+	for (auto& thr : threads)
+	{
+		if (thr.joinable())
+			thr.join();
+	}
+}
+
 }
