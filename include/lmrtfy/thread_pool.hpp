@@ -77,6 +77,10 @@ protected:
 	
 	// Queue of tasks to be completed.
 	task_queue_t tasks;
+	
+	// Adds a task to the task queue, notifies one thread,
+	//  and returns the future from the task.
+	auto add_task(auto&& task);
 };
 
 /*!
@@ -286,6 +290,74 @@ thread_pool_base<task_queue_t>::~thread_pool_base()
 	{
 		if (thr.joinable())
 			thr.join();
+	}
+}
+
+template<class task_queue_t>
+auto thread_pool_base<task_queue_t>::add_task(auto&& task)
+{
+	auto fut = task.get_future();
+	
+	{
+		std::lock_guard lock(this->mut);
+		this->tasks.emplace(std::move(task));
+	}
+	
+	// Notify one waiting thread so it can wake up and take this new task.
+	this->signal.notify_one();
+	
+	return fut;
+}
+
+template<class thread_id_t>
+template<class F, class... Args>
+#ifdef __cpp_concepts
+	requires std::invocable<F,thread_id_t,Args...>
+#endif
+std::future<std::invoke_result_t<F,thread_id_t,Args...>>
+	thread_pool<thread_id_t>::push(F&& f, Args&&... args)
+{
+	using package_t = std::packaged_task<
+		std::invoke_result_t<F,thread_id_t,Args...>(thread_id_t)
+	>;
+	
+	if constexpr (sizeof...(Args) != 0)
+	{
+		return this->add_task(package_t
+		{
+			// This could be done with a lambda, but we
+			// would need to cover void and non-void cases.
+			std::bind(std::forward<F>(f), std::placeholders::_1,
+				std::forward<Args>(args)...)
+		});
+	}
+	else
+	{
+		return this->add_task(package_t{std::forward<F>(f)});
+	}
+}
+
+template<class F, class... Args>
+#ifdef __cpp_concepts
+	requires std::invocable<F,Args...>
+#endif
+std::future<std::invoke_result_t<F,Args...>>
+	thread_pool<void>::push(F&& f, Args&&... args)
+{
+	using package_t = std::packaged_task<std::invoke_result_t<F,Args...>()>;
+	
+	if constexpr (sizeof...(Args) != 0)
+	{
+		return this->add_task(package_t
+		{
+			// This could be done with a lambda, but we
+			// would need to cover void and non-void cases.
+			std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+		});
+	}
+	else
+	{
+		return this->add_task(package_t{std::forward<F>(f)});
 	}
 }
 
