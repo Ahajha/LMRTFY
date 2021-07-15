@@ -33,7 +33,10 @@ public:
 	explicit thread_pool_base(std::size_t n_threads = std::thread::hardware_concurrency())
 		: n_idle_(0), state(_pool_state::running) {}
 	
-	~thread_pool_base() = default;
+	/*!
+	Waits for all tasks in the queue to be finished, then stops.
+	*/
+	~thread_pool_base();
 	
 	/*!
 	Returns the number of threads in the pool.
@@ -98,11 +101,6 @@ public:
 	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
 	
 	/*!
-	Waits for all tasks in the queue to be finished, then stops.
-	*/
-	~thread_pool();
-	
-	/*!
 	Pushes a function and its arguments to the task queue. Returns the result as a future.
 	f should take a thread_id_t as its first parameter, the thread ID is given through this.
 	Thread IDs are numbered in [0, size()). Expects that thread_id_t's maximum value is at least
@@ -116,12 +114,6 @@ public:
 		requires std::invocable<F,thread_id_t,Args...>
 #endif
 	std::future<std::invoke_result_t<F,thread_id_t,Args...>> push(F&& f, Args&&... args);
-	
-	// Various members are either not copyable or movable, thus the pool is neither.
-	thread_pool(const thread_pool&) = delete;
-	thread_pool(thread_pool&&) = delete;
-	thread_pool& operator=(const thread_pool&) = delete;
-	thread_pool& operator=(thread_pool&&) = delete;
 };
 
 /*!
@@ -140,11 +132,6 @@ public:
 	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
 	
 	/*!
-	Waits for all tasks in the queue to be finished, then stops.
-	*/
-	~thread_pool();
-	
-	/*!
 	Pushes a function and its arguments to the task queue. Returns the result as a future.
 	*/
 	template<class F, class... Args>
@@ -155,12 +142,6 @@ public:
 		requires std::invocable<F,Args...>
 #endif
 	std::future<std::invoke_result_t<F,Args...>> push(F&& f, Args&&... args);
-	
-	// Various members are either not copyable or movable, thus the pool is neither.
-	thread_pool(const thread_pool&) = delete;
-	thread_pool(thread_pool&&) = delete;
-	thread_pool& operator=(const thread_pool&) = delete;
-	thread_pool& operator=(thread_pool&&) = delete;
 };
 
 template<class thread_id_t>
@@ -285,33 +266,8 @@ thread_pool<void>::thread_pool(std::size_t n_threads) :
 	}
 }
 
-template<class thread_id_t>
-#ifdef __cpp_concepts
-	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
-#endif
-thread_pool<thread_id_t>::~thread_pool()
-{
-	// Give the waiting threads a command to finish.
-	{
-		std::lock_guard lock(this->mut);
-		
-		this->state = (this->n_idle_ == this->size() && this->tasks.empty())
-			? _pool_state::stopped
-			: _pool_state::stopping;
-	}
-	
-	// Signal everyone in case any have gone to sleep.
-	this->signal.notify_all();
-	
-	// Wait for the computing threads to finish.
-	for (auto& thr : this->threads)
-	{
-		if (thr.joinable())
-			thr.join();
-	}
-}
-
-thread_pool<void>::~thread_pool()
+template<class task_queue_t>
+thread_pool_base<task_queue_t>::~thread_pool_base()
 {
 	// Give the waiting threads a command to finish.
 	{
