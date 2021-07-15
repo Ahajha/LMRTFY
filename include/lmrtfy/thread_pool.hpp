@@ -16,6 +16,60 @@
 namespace lmrtfy
 {
 
+/*
+Base class for thread pool implementations. Not intended to be used directly, though can't
+do anything useful anyways. Omits push() and the task queue, which need to be specialized
+by the template subclass.
+*/
+class thread_pool_base
+{
+public:
+	explicit thread_pool_base(std::size_t n_threads = std::thread::hardware_concurrency())
+		: n_idle_(0), state(pool_state::running) {}
+	
+	~thread_pool_base() = default;
+	
+	/*!
+	Returns the number of threads in the pool.
+	*/
+	[[nodiscard]] std::size_t size() const { return threads.size(); }
+	
+	/*!
+	Returns the number of currently idle threads.
+	*/
+	[[nodiscard]] std::size_t n_idle() const { return n_idle_; }
+	
+	// Various members are either not copyable or movable, thus the pool is neither.
+	thread_pool_base(const thread_pool_base&) = delete;
+	thread_pool_base(thread_pool_base&&) = delete;
+	thread_pool_base& operator=(const thread_pool_base&) = delete;
+	thread_pool_base& operator=(thread_pool_base&&) = delete;
+	
+protected:
+	std::vector<std::thread> threads;
+	
+	// Number of currently idle threads. Required to ensure the threads are "all-or-nothing",
+	// that is, threads will only stop if they know all other threads will stop.
+	std::size_t n_idle_;
+	
+	// Initially set to running, set to stopping when the destructor is called, then set to
+	// stopped once all threads are idle and there is no more work to be done.
+	enum class pool_state : uint8_t
+	{
+		running, stopping, stopped
+	} state;
+	
+	// Used for waking up threads when new tasks are available or the pool is stopping.
+	// Note that according to
+	// https://en.cppreference.com/w/cpp/thread/condition_variable/notify_one
+	// , signals shouldn't need to be guarded by holding a mutex.
+	std::condition_variable signal;
+	
+	// Used for atomic operations on the task queue. Any modifications done to the
+	// thread pool are done while holding this mutex.
+	std::mutex mut;
+};
+
 /*!
 Thread pool class.
 Thread_id_t is used to determine the signature of callable objects it accepts. More
@@ -28,7 +82,7 @@ template<class thread_id_t = void>
 	// helpful error messages.
 	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
 #endif
-class thread_pool
+class thread_pool : public thread_pool_base
 {
 public:
 	/*!
@@ -41,16 +95,6 @@ public:
 	Waits for all tasks in the queue to be finished, then stops.
 	*/
 	~thread_pool();
-	
-	/*!
-	Returns the number of threads in the pool.
-	*/
-	[[nodiscard]] std::size_t size() const { return threads.size(); }
-	
-	/*!
-	Returns the number of currently idle threads.
-	*/
-	[[nodiscard]] std::size_t n_idle() const { return n_idle_; }
 	
 	/*!
 	Pushes a function and its arguments to the task queue. Returns the result as a future.
@@ -80,12 +124,6 @@ public:
 	thread_pool& operator=(thread_pool&&) = delete;
 
 private:
-	std::vector<std::thread> threads;
-	
-	// Number of currently idle threads. Required to ensure the threads are "all-or-nothing",
-	// that is, threads will only stop if they know all other threads will stop.
-	std::size_t n_idle_;
-	
 	/*
 	I would like to just implement the queue directly in the thread_pool class as
 	std::queue<fu2::unique_function<std::conditional_t
@@ -101,28 +139,9 @@ private:
 	template<class T, int _ = 0>
 	struct task_queue;
 	
-	task_queue<thread_id_t> tasks;
-	
 	// Queue of tasks to be completed. fu2::unique_function is used to allow non-copyable
 	// types to be inserted.
-	//task_queue<thread_id_t> tasks;
-	
-	// Initially set to running, set to stopping when the destructor is called, then set to
-	// stopped once all threads are idle and there is no more work to be done.
-	enum class pool_state : uint8_t
-	{
-		running, stopping, stopped
-	} state;
-	
-	// Used for waking up threads when new tasks are available or the pool is stopping.
-	// Note that according to
-	// https://en.cppreference.com/w/cpp/thread/condition_variable/notify_one
-	// , signals shouldn't need to be guarded by holding a mutex.
-	std::condition_variable signal;
-	
-	// Used for atomic operations on the task queue. Any modifications done to the
-	// thread pool are done while holding this mutex.
-	std::mutex mut;
+	task_queue<thread_id_t> tasks;
 };
 
 template<class T>
@@ -143,8 +162,7 @@ template<class thread_id_t>
 #ifdef __cpp_concepts
 	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
 #endif
-thread_pool<thread_id_t>::thread_pool(std::size_t n_threads) :
-	n_idle_(0), state(pool_state::running)
+thread_pool<thread_id_t>::thread_pool(std::size_t n_threads) : thread_pool_base(n_threads)
 {
 	// If thread_id_t is void, use std::size_t as the fallback type to be captured.
 	// This will end up getting ignored, so it just needs to have a compatible type.
