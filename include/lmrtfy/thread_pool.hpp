@@ -79,8 +79,9 @@ protected:
 	task_queue_t tasks;
 	
 	// Adds a task to the task queue, notifies one thread,
-	//  and returns the future from the task.
-	auto add_task(auto&& task);
+	// and returns the future from the task.
+	template<class Ret, class... Args>
+	std::future<Ret> add_task(std::packaged_task<Ret(Args...)>&& task);
 };
 
 /*!
@@ -294,7 +295,9 @@ thread_pool_base<task_queue_t>::~thread_pool_base()
 }
 
 template<class task_queue_t>
-auto thread_pool_base<task_queue_t>::add_task(auto&& task)
+template<class Ret, class... Args>
+std::future<Ret> thread_pool_base<task_queue_t>::add_task
+	(std::packaged_task<Ret(Args...)>&& task)
 {
 	auto fut = task.get_future();
 	
