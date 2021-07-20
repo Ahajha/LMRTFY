@@ -7,6 +7,8 @@
 #include <thread>
 #include <queue>
 #include <mutex>
+#include <functional>
+#include <utility>
 #include "function2/function2.hpp"
 
 #ifdef __cpp_concepts
