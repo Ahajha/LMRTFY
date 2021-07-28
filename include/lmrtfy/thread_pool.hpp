@@ -23,8 +23,6 @@ enum class _pool_state : uint8_t
 	running, stopping, stopped
 };
 
-struct _worker_thread;
-
 /*
 Base class for thread pool implementations. Not intended to be used directly, though can't
 do anything useful anyways. Omits push() and the task queue, which need to be specialized
