@@ -23,6 +23,8 @@ enum class _pool_state : uint8_t
 	running, stopping, stopped
 };
 
+struct _worker_thread;
+
 /*
 Base class for thread pool implementations. Not intended to be used directly, though can't
 do anything useful anyways. Omits push() and the task queue, which need to be specialized
@@ -84,6 +86,8 @@ protected:
 	// and returns the future from the task.
 	template<class Ret, class... Args>
 	std::future<Ret> add_task(std::packaged_task<Ret(Args...)>&& task);
+	
+	friend class _worker_thread;
 };
 
 /*!
@@ -151,6 +155,60 @@ public:
 	std::future<std::invoke_result_t<F,Args...>> push(F&& f, Args&&... args);
 };
 
+struct _worker_thread
+{
+	template<class task_queue_t, class... Args>
+	void operator()(thread_pool_base<task_queue_t>* pool, Args... args) const
+	{
+		std::unique_lock mutex_lock(pool->mut);
+		
+		while (true)
+		{
+			// Try to get a task
+			if (pool->tasks.empty())
+			{
+				// No tasks, this thread is now idle.
+				++pool->n_idle_;
+				
+				// If this was the last worker running and the pool is stopping, wake
+				// up all other threads, who are waiting for the others to finish.
+				if (pool->n_idle_ == pool->size() && pool->state == _pool_state::stopping)
+				{
+					pool->state = _pool_state::stopped;
+					
+					// Minor optimization, unlock now instead of having it release
+					// automatically. This also allows the notification to not require
+					// the lock. We also must return now, since it can't be woken up later.
+					mutex_lock.unlock();
+					pool->signal.notify_all();
+					return;
+				}
+				
+				// Wait for a signal (wait unlocks and relocks the mutex). A signal is
+				// sent when a new task comes in, the last worker finishes the last task,
+				// or the threads are told to stop.
+				pool->signal.wait(mutex_lock);
+				
+				if (pool->state == _pool_state::stopped) return;
+				
+				--pool->n_idle_;
+			}
+			else
+			{
+				// Grab the next task and run it.
+				auto task = std::move(pool->tasks.front());
+				pool->tasks.pop();
+				
+				mutex_lock.unlock();
+				
+				task(args...);
+				
+				mutex_lock.lock();
+			}
+		}
+	}
+};
+
 template<class thread_id_t>
 #ifdef __cpp_concepts
 	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
@@ -161,56 +219,8 @@ thread_pool<thread_id_t>::thread_pool(std::size_t n_threads) :
 	this->threads.reserve(n_threads);
 	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
 	{
-		// Main loop for the threads
-		this->threads.emplace_back([this, thread_id = static_cast<thread_id_t>(thread_id)]
-		{
-			std::unique_lock mutex_lock(this->mut);
-			
-			while (true)
-			{
-				// Try to get a task
-				if (this->tasks.empty())
-				{
-					// No tasks, this thread is now idle.
-					++this->n_idle_;
-					
-					// If this was the last worker running and the pool is stopping, wake
-					// up all other threads, who are waiting for the others to finish.
-					if (this->n_idle_ == this->size() && this->state == _pool_state::stopping)
-					{
-						this->state = _pool_state::stopped;
-						
-						// Minor optimization, unlock now instead of having it release
-						// automatically. This also allows the notification to not require
-						// the lock. We also must return now, since it can't be woken up later.
-						mutex_lock.unlock();
-						this->signal.notify_all();
-						return;
-					}
-					
-					// Wait for a signal (wait unlocks and relocks the mutex). A signal is
-					// sent when a new task comes in, the last worker finishes the last task,
-					// or the threads are told to stop.
-					this->signal.wait(mutex_lock);
-					
-					if (this->state == _pool_state::stopped) return;
-					
-					--this->n_idle_;
-				}
-				else
-				{
-					// Grab the next task and run it.
-					auto task = std::move(this->tasks.front());
-					this->tasks.pop();
-					
-					mutex_lock.unlock();
-					
-					task(thread_id);
-					
-					mutex_lock.lock();
-				}
-			}
-		});
+		this->threads.emplace_back(_worker_thread{},
+			this, static_cast<thread_id_t>(thread_id));
 	}
 }
 
@@ -220,56 +230,7 @@ thread_pool<void>::thread_pool(std::size_t n_threads) :
 	this->threads.reserve(n_threads);
 	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
 	{
-		// Main loop for the threads
-		this->threads.emplace_back([this]
-		{
-			std::unique_lock mutex_lock(this->mut);
-			
-			while (true)
-			{
-				// Try to get a task
-				if (this->tasks.empty())
-				{
-					// No tasks, this thread is now idle.
-					++this->n_idle_;
-					
-					// If this was the last worker running and the pool is stopping, wake
-					// up all other threads, who are waiting for the others to finish.
-					if (this->n_idle_ == this->size() && this->state == _pool_state::stopping)
-					{
-						this->state = _pool_state::stopped;
-						
-						// Minor optimization, unlock now instead of having it release
-						// automatically. This also allows the notification to not require
-						// the lock. We also must return now, since it can't be woken up later.
-						mutex_lock.unlock();
-						this->signal.notify_all();
-						return;
-					}
-					
-					// Wait for a signal (wait unlocks and relocks the mutex). A signal is
-					// sent when a new task comes in, the last worker finishes the last task,
-					// or the threads are told to stop.
-					this->signal.wait(mutex_lock);
-					
-					if (this->state == _pool_state::stopped) return;
-					
-					--this->n_idle_;
-				}
-				else
-				{
-					// Grab the next task and run it.
-					auto task = std::move(this->tasks.front());
-					this->tasks.pop();
-					
-					mutex_lock.unlock();
-					
-					task();
-					
-					mutex_lock.lock();
-				}
-			}
-		});
+		this->threads.emplace_back(_worker_thread{}, this);
 	}
 }
 
