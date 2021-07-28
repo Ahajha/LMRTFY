@@ -276,6 +276,9 @@ std::future<Ret> thread_pool_base<task_queue_t>::add_task
 }
 
 template<class thread_id_t>
+#ifdef __cpp_concepts
+	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
+#endif
 template<class F, class... Args>
 #ifdef __cpp_concepts
 	requires std::invocable<F,thread_id_t,Args...>
