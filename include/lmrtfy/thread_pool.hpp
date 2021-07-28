@@ -34,8 +34,7 @@ template<class task_queue_t>
 class thread_pool_base
 {
 public:
-	explicit thread_pool_base(std::size_t n_threads = std::thread::hardware_concurrency())
-		: n_idle_(0), state(_pool_state::running) {}
+	explicit thread_pool_base() : n_idle_(0), state(_pool_state::running) {}
 	
 	/*!
 	Waits for all tasks in the queue to be finished, then stops.
@@ -213,8 +212,7 @@ template<class thread_id_t>
 #ifdef __cpp_concepts
 	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
 #endif
-thread_pool<thread_id_t>::thread_pool(std::size_t n_threads) :
-	thread_pool_base<std::queue<fu2::unique_function<void(thread_id_t)>>>(n_threads)
+thread_pool<thread_id_t>::thread_pool(std::size_t n_threads)
 {
 	this->threads.reserve(n_threads);
 	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
@@ -224,8 +222,7 @@ thread_pool<thread_id_t>::thread_pool(std::size_t n_threads) :
 	}
 }
 
-thread_pool<void>::thread_pool(std::size_t n_threads) :
-	thread_pool_base<std::queue<fu2::unique_function<void()>>>(n_threads)
+thread_pool<void>::thread_pool(std::size_t n_threads)
 {
 	this->threads.reserve(n_threads);
 	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
