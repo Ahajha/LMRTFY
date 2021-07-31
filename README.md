@@ -38,7 +38,7 @@ int main()
 {
   lmrtfy::thread_pool pool;
   
-  std::future& sum = pool.push(add, 2, 2);
+  std::future<int> sum = pool.push(add, 2, 2);
   
   std::cout << sum.get() << '\n';
 }
@@ -52,7 +52,7 @@ int main()
 {
   lmrtfy::thread_pool pool;
   
-  std::future& sum = pool.push([](int x, int y)
+  std::future<int> sum = pool.push([](int x, int y)
   {
     return x + y;
   }, 2, 2);
@@ -124,15 +124,15 @@ Additionally, you can specify that thread IDs be passed into the tasks by giving
 #include <vector>
 #include "lmrtfy/thread_pool.hpp"
 
-lmrtfy::thread_pool<std::size_t> pool;
-
-std::vector<std::vector<int>> nums(pool.size());
-
 int main()
 {
+  lmrtfy::thread_pool<std::size_t> pool;
+  
+  std::vector<std::vector<int>> nums(pool.size());
+  
   for (std::size_t i = 0; i < pool.size() * 100; ++i)
   {
-    pool.push([](std::size_t id)
+    pool.push([&](std::size_t id, std::size_t i)
     {
       nums[id].push_back(i);
     }, i);
