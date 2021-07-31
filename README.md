@@ -75,8 +75,8 @@ int parallel_vec_sum(const std::vector<int>& vec)
   
   for (std::size_t i = 0; i < pool.size(); ++i)
   {
-  	auto begin = vec.begin(), end = vec.begin();
-  	std::advance(begin, (vec.size() * i) / pool.size());
+    auto begin = vec.begin(), end = vec.begin();
+    std::advance(begin, (vec.size() * i) / pool.size());
     std::advance(end  , (vec.size() * (i + 1)) / pool.size());
     
     futures.push_back(pool.push(std::accumulate<decltype(vec.begin()), int>, begin, end, 0));
