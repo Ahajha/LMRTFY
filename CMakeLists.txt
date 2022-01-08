@@ -14,7 +14,7 @@ include(FetchContent)
 FetchContent_Declare(
 	Function2
 	GIT_REPOSITORY "https://github.com/Naios/function2"
-	GIT_TAG "02ca99831de59c7c3a4b834789260253cace0ced"
+	GIT_TAG "4.2.0"
 )
 
 FetchContent_MakeAvailable(Function2)
