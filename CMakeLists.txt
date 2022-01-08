@@ -23,7 +23,7 @@ find_package( Threads )
 
 target_link_libraries(lmrtfy INTERFACE function2 ${CMAKE_THREAD_LIBS_INIT})
 
-# Examples only available if this is the main app
+# Tests only available if this is the main app
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-  add_subdirectory(examples)
+  add_subdirectory(tests)
 endif()
