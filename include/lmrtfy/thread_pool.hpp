@@ -137,7 +137,7 @@ public:
 	Creates a thread pool with a given number of threads. Default attempts to use all threads
 	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
 	*/
-	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
+	inline explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
 	
 	/*!
 	Pushes a function and its arguments to the task queue. Returns the result as a future.
@@ -149,7 +149,7 @@ public:
 		// should produce better error messages in C++20.
 		requires std::invocable<F,Args...>
 #endif
-	std::future<std::invoke_result_t<F,Args...>> push(F&& f, Args&&... args);
+	inline std::future<std::invoke_result_t<F,Args...>> push(F&& f, Args&&... args);
 };
 
 struct _worker_thread
