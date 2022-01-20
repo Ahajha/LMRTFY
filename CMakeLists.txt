@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.14)
 project(lmrtfy
-	DESCRIPTION "A C++17 thread pool library"
+	DESCRIPTION "A C++20 thread pool library"
 	LANGUAGES CXX)
 
 add_library(lmrtfy INTERFACE)
 
 target_include_directories(lmrtfy INTERFACE include)
 
-target_compile_features(lmrtfy INTERFACE cxx_std_17)
+target_compile_features(lmrtfy INTERFACE cxx_std_20)
 
 include(FetchContent)
 

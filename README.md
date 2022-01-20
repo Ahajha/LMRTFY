@@ -1,5 +1,5 @@
 # LMRTFY
-Let Me Run That For You: A C++17 Thread Pool Library
+Let Me Run That For You: A C++20 Thread Pool Library
 
 ## What is a Thread Pool?
 A thread pool is a container that keeps a set of internal threads, and dispatches tasks given to it to its threads, which are reused until the pool is destroyed. Thread pools aim to mostly eliminate the overhead of starting and stopping threads every time you want to run a task, lowering the overhead to just that of inserting and removing from the pool. They allow for simpler implementations of highly parallel algorithms.
