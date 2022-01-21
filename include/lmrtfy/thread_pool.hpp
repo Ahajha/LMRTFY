@@ -28,7 +28,7 @@ Base class for thread pool implementations. Not intended to be used directly, th
 do anything useful anyways. Omits push() and the task queue, which need to be specialized
 by the template subclass.
 */
-template<class task_queue_t>
+template<class task_queue_t, class... base_args_ts>
 class thread_pool_base
 {
 public:
@@ -99,7 +99,7 @@ template<class thread_id_t = void>
 	// helpful error messages.
 	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
 #endif
-class thread_pool : public thread_pool_base<std::queue<fu2::unique_function<void(thread_id_t)>>>
+class thread_pool : public thread_pool_base<std::queue<fu2::unique_function<void(thread_id_t)>>, thread_id_t>
 {
 public:
 	/*!
@@ -154,8 +154,8 @@ public:
 
 struct _worker_thread
 {
-	template<class task_queue_t, class... Args>
-	void operator()(thread_pool_base<task_queue_t>* pool, Args... args) const
+	template<class task_queue_t, class... base_args_ts>
+	void operator()(thread_pool_base<task_queue_t, base_args_ts...>* pool, base_args_ts... args) const
 	{
 		std::unique_lock mutex_lock(pool->mut);
 		
@@ -229,8 +229,8 @@ thread_pool<void>::thread_pool(std::size_t n_threads)
 	}
 }
 
-template<class task_queue_t>
-thread_pool_base<task_queue_t>::~thread_pool_base()
+template<class task_queue_t, class... base_args_ts>
+thread_pool_base<task_queue_t, base_args_ts...>::~thread_pool_base()
 {
 	// Give the waiting threads a command to finish.
 	{
@@ -252,9 +252,9 @@ thread_pool_base<task_queue_t>::~thread_pool_base()
 	}
 }
 
-template<class task_queue_t>
+template<class task_queue_t, class... base_args_ts>
 template<class Ret, class... Args>
-std::future<Ret> thread_pool_base<task_queue_t>::add_task
+std::future<Ret> thread_pool_base<task_queue_t, base_args_ts...>::add_task
 	(std::packaged_task<Ret(Args...)>&& task)
 {
 	auto fut = task.get_future();
