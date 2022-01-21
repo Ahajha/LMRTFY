@@ -28,7 +28,7 @@ Base class for thread pool implementations. Not intended to be used directly, th
 do anything useful anyways. Omits push() and the task queue, which need to be specialized
 by the template subclass.
 */
-template<class task_queue_t, class... base_args_ts>
+template<class task_queue_t, class... base_arg_ts>
 class thread_pool_base
 {
 public:
@@ -55,6 +55,15 @@ public:
 	thread_pool_base& operator=(const thread_pool_base&) = delete;
 	thread_pool_base& operator=(thread_pool_base&&) = delete;
 	
+	/*!
+	Pushes a function and its arguments to the task queue. Returns the
+	result as a future. f should take all specified base parameters,
+	followed by the parameters passed to push(), as its arguments.
+	*/
+	template<class f_t, class... arg_ts>
+		requires std::invocable<f_t, base_arg_ts..., arg_ts...>
+	std::future<std::invoke_result_t<f_t, base_arg_ts..., arg_ts...>> push(f_t&& f, arg_ts&&... args);
+	
 protected:
 	std::vector<std::thread> threads;
 	
@@ -79,11 +88,6 @@ protected:
 	// Queue of tasks to be completed.
 	task_queue_t tasks;
 	
-	// Adds a task to the task queue, notifies one thread,
-	// and returns the future from the task.
-	template<class Ret, class... Args>
-	std::future<Ret> add_task(std::packaged_task<Ret(Args...)>&& task);
-	
 	friend class _worker_thread;
 };
 
@@ -107,21 +111,6 @@ public:
 	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
 	*/
 	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
-	
-	/*!
-	Pushes a function and its arguments to the task queue. Returns the result as a future.
-	f should take a thread_id_t as its first parameter, the thread ID is given through this.
-	Thread IDs are numbered in [0, size()). Expects that thread_id_t's maximum value is at least
-	(size() - 1), so that the thread IDs can be passed correctly, behaviour is undefined if not.
-	*/
-	template<class F, class... Args>
-#ifdef __cpp_concepts
-		// Strictly speaking, this shouldn't cause any compile errors, as std::invoke_result
-		// will produce an error if this does. However, this is here as a nice-to-have, as it
-		// should produce better error messages in C++20.
-		requires std::invocable<F,thread_id_t,Args...>
-#endif
-	std::future<std::invoke_result_t<F,thread_id_t,Args...>> push(F&& f, Args&&... args);
 };
 
 /*!
@@ -138,24 +127,12 @@ public:
 	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
 	*/
 	inline explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
-	
-	/*!
-	Pushes a function and its arguments to the task queue. Returns the result as a future.
-	*/
-	template<class F, class... Args>
-#ifdef __cpp_concepts
-		// Strictly speaking, this shouldn't cause any compile errors, as std::invoke_result
-		// will produce an error if this does. However, this is here as a nice-to-have, as it
-		// should produce better error messages in C++20.
-		requires std::invocable<F,Args...>
-#endif
-	inline std::future<std::invoke_result_t<F,Args...>> push(F&& f, Args&&... args);
 };
 
 struct _worker_thread
 {
-	template<class task_queue_t, class... base_args_ts>
-	void operator()(thread_pool_base<task_queue_t, base_args_ts...>* pool, base_args_ts... args) const
+	template<class task_queue_t, class... base_arg_ts>
+	void operator()(thread_pool_base<task_queue_t, base_arg_ts...>* pool, base_arg_ts... args) const
 	{
 		std::unique_lock mutex_lock(pool->mut);
 		
@@ -229,8 +206,38 @@ thread_pool<void>::thread_pool(std::size_t n_threads)
 	}
 }
 
-template<class task_queue_t, class... base_args_ts>
-thread_pool_base<task_queue_t, base_args_ts...>::~thread_pool_base()
+template<class task_queue_t, class... base_arg_ts>
+template<class f_t, class... arg_ts>
+	requires std::invocable<f_t, base_arg_ts..., arg_ts...>
+std::future<std::invoke_result_t<f_t, base_arg_ts..., arg_ts...>>
+	thread_pool_base<task_queue_t, base_arg_ts...>::push(f_t&& f, arg_ts&&... args)
+{
+	using package_t = std::packaged_task<
+		std::invoke_result_t<f_t, base_arg_ts..., arg_ts...>(base_arg_ts...)
+	>;
+	
+	auto task = package_t([f = std::forward<f_t>(f), ... args = std::forward<arg_ts>(args)]
+		(base_arg_ts... base_args)
+		{
+			return f(base_args..., args...);
+		}
+	);
+	
+	auto fut = task.get_future();
+	
+	{
+		std::lock_guard lock(this->mut);
+		this->tasks.emplace(std::move(task));
+	}
+	
+	// Notify one waiting thread so it can wake up and take this new task.
+	this->signal.notify_one();
+	
+	return fut;
+}
+
+template<class task_queue_t, class... base_arg_ts>
+thread_pool_base<task_queue_t, base_arg_ts...>::~thread_pool_base()
 {
 	// Give the waiting threads a command to finish.
 	{
@@ -249,79 +256,6 @@ thread_pool_base<task_queue_t, base_args_ts...>::~thread_pool_base()
 	{
 		if (thr.joinable())
 			thr.join();
-	}
-}
-
-template<class task_queue_t, class... base_args_ts>
-template<class Ret, class... Args>
-std::future<Ret> thread_pool_base<task_queue_t, base_args_ts...>::add_task
-	(std::packaged_task<Ret(Args...)>&& task)
-{
-	auto fut = task.get_future();
-	
-	{
-		std::lock_guard lock(this->mut);
-		this->tasks.emplace(std::move(task));
-	}
-	
-	// Notify one waiting thread so it can wake up and take this new task.
-	this->signal.notify_one();
-	
-	return fut;
-}
-
-template<class thread_id_t>
-#ifdef __cpp_concepts
-	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
-#endif
-template<class F, class... Args>
-#ifdef __cpp_concepts
-	requires std::invocable<F,thread_id_t,Args...>
-#endif
-std::future<std::invoke_result_t<F,thread_id_t,Args...>>
-	thread_pool<thread_id_t>::push(F&& f, Args&&... args)
-{
-	using package_t = std::packaged_task<
-		std::invoke_result_t<F,thread_id_t,Args...>(thread_id_t)
-	>;
-	
-	if constexpr (sizeof...(Args) != 0)
-	{
-		return this->add_task(package_t
-		{
-			// This could be done with a lambda, but we
-			// would need to cover void and non-void cases.
-			std::bind(std::forward<F>(f), std::placeholders::_1,
-				std::forward<Args>(args)...)
-		});
-	}
-	else
-	{
-		return this->add_task(package_t{std::forward<F>(f)});
-	}
-}
-
-template<class F, class... Args>
-#ifdef __cpp_concepts
-	requires std::invocable<F,Args...>
-#endif
-std::future<std::invoke_result_t<F,Args...>>
-	thread_pool<void>::push(F&& f, Args&&... args)
-{
-	using package_t = std::packaged_task<std::invoke_result_t<F,Args...>()>;
-	
-	if constexpr (sizeof...(Args) != 0)
-	{
-		return this->add_task(package_t
-		{
-			// This could be done with a lambda, but we
-			// would need to cover void and non-void cases.
-			std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-		});
-	}
-	else
-	{
-		return this->add_task(package_t{std::forward<F>(f)});
 	}
 }
 
