@@ -127,7 +127,7 @@ TEST_CASE("ensure a reasonable spread of jobs across threads")
 	
 	std::vector<int> n_jobs_per_thread(std::thread::hardware_concurrency(), 0);
 	{
-	lmrtfy::thread_pool<int> pool;
+	lmrtfy::thread_pool<lmrtfy::thread_id<int>> pool;
 	
 	const auto total_jobs = pool.size() * expected_n_jobs_per_thread;
 	
@@ -144,4 +144,34 @@ TEST_CASE("ensure a reasonable spread of jobs across threads")
 	{
 		CHECK(n_jobs >= expected_n_jobs_per_thread / 2);
 	}
+}
+
+TEST_CASE("pass custom per-thread item constructor")
+{
+	constexpr auto construct = [](auto&, std::size_t id)
+	{
+		return std::vector<int>{static_cast<int>(id)};
+	};
+
+	lmrtfy::thread_pool<lmrtfy::thread_id<int>, decltype(construct)> pool;
+	
+	// This currently does not work as intented, objects have to be passed
+	// in by the *exact* type they are created as, here that is a
+	// std::vector<int>, no reference. A potential solution is to store
+	// a single instance of each base argument type, and that would allow
+	// these functions to return references.
+	/*
+	for (int i = 0; i < 100 * pool.size(); ++i)
+	{
+		pool.push([](std::size_t tid, std::vector<int> vec)
+		{
+			CHECK(vec.size() <= 1);
+
+			if (vec.size() == 1)
+			{
+				CHECK(vec[0] == tid);
+			}
+		});
+	}
+	*/
 }

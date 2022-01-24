@@ -23,6 +23,16 @@ enum class _pool_state : uint8_t
 	running, stopping, stopped
 };
 
+template<std::integral id_t>
+struct thread_id
+{
+	template<class pool_t>
+	id_t operator()(pool_t&, std::size_t id) const
+	{
+		return static_cast<id_t>(id);
+	}
+};
+
 /*
 Base class for thread pool implementations. Not intended to be used directly, though can't
 do anything useful anyways. Omits push() and the task queue, which need to be specialized
@@ -96,14 +106,9 @@ Thread pool class.
 Thread_id_t is used to determine the signature of callable objects it accepts. More
 information about this parameter in push().
 */
-template<class thread_id_t = void>
-#ifdef __cpp_concepts
-	// In C++17, the thread ID is "duck-typed" to probably only compile if it is an integral,
-	// but this is not enforced. In C++20, this is enforced, and will likely give more
-	// helpful error messages.
-	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
-#endif
-class thread_pool : public thread_pool_base<std::queue, thread_id_t>
+template<class... base_arg_ts>
+class thread_pool : public
+	thread_pool_base<std::queue, std::invoke_result_t<base_arg_ts, thread_pool<base_arg_ts...>&, std::size_t>...>
 {
 public:
 	/*!
@@ -111,22 +116,6 @@ public:
 	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
 	*/
 	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
-};
-
-/*!
-Thread pool class.
-Thread_id_t is used to determine the signature of callable objects it accepts. More
-information about this parameter in push().
-*/
-template<>
-class thread_pool<void> : public thread_pool_base<std::queue>
-{
-public:
-	/*!
-	Creates a thread pool with a given number of threads. Default attempts to use all threads
-	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
-	*/
-	inline explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
 };
 
 struct _worker_thread
@@ -183,26 +172,14 @@ struct _worker_thread
 	}
 };
 
-template<class thread_id_t>
-#ifdef __cpp_concepts
-	requires (std::is_void_v<thread_id_t> || std::integral<thread_id_t>)
-#endif
-thread_pool<thread_id_t>::thread_pool(std::size_t n_threads)
+template<class... base_arg_ts>
+thread_pool<base_arg_ts...>::thread_pool(std::size_t n_threads)
 {
 	this->threads.reserve(n_threads);
 	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
 	{
 		this->threads.emplace_back(_worker_thread{},
-			this, static_cast<thread_id_t>(thread_id));
-	}
-}
-
-thread_pool<void>::thread_pool(std::size_t n_threads)
-{
-	this->threads.reserve(n_threads);
-	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
-	{
-		this->threads.emplace_back(_worker_thread{}, this);
+			this, base_arg_ts{}(*this, thread_id)...);
 	}
 }
 
