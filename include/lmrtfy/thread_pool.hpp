@@ -8,6 +8,7 @@
 #include <queue>
 #include <mutex>
 #include <functional>
+#include <tuple>
 #include <utility>
 #include "function2/function2.hpp"
 
@@ -201,15 +202,55 @@ thread_pool_base<task_queue_t, base_arg_ts...>::~thread_pool_base()
 	}
 }
 
+template<class, class, class>
+struct thread_constructor;
+
+// We use this to expand a tuple (tup) back into a parameter pack.
+// This is intended to be templated with a std::make_integer_sequence<sizeof...(Ts)>,
+// which creates a sequence 0,1,...,(sizeof...(Ts) - 1). This can then be used with
+// std::get to get each item in the tuple and apply a function to it.
+// This must be a struct because we require this to be a partial specialization.
+template<class pool, class tuple, std::size_t... idxs>
+struct thread_constructor<pool, tuple, std::integer_sequence<std::size_t, idxs...>>
+{
+	pool& p;
+	tuple& tup;
+	std::vector<std::thread>& threads;
+	
+	void construct(std::size_t tid) const
+    {
+        threads.emplace_back(worker_thread{}, &p, (std::get<idxs>(tup)(p, tid))...);
+    }
+};
+
+// The thread pool must ensure this tuple is destroyed *after* the threads finish
+// working, otherwise there may be lifetime issues. Since members must be destroyed
+// before base classes, we get around this by privately inheriting from this base
+// class, allowing the other base class to be destroyed first.
+template<class... Ts>
+struct tuple_base_class
+{
+	std::tuple<Ts...> tup;
+};
+
 } // namespace detail
 
 /*!
-Thread pool class.
-Thread_id_t is used to determine the signature of callable objects it accepts. More
-information about this parameter in push().
+Thread pool class. Base_arg_ts are structures with the following interface:
+struct name
+{
+	explicit name(std::size_t n_threads) { ... }
+	
+	template<class pool>
+	auto operator()(pool& p, std::size_t tid) { ... }
+};
+One copy of this struct is held, which is valid for the lifetime of the thread pool.
+Operator() is called to construct an item to be passed to each thread using each
+thread's thread ID.
 */
 template<class... base_arg_ts>
-class thread_pool : public detail::thread_pool_base<std::queue,
+class thread_pool : private detail::tuple_base_class<base_arg_ts...>,
+	public detail::thread_pool_base<std::queue,
 	std::invoke_result_t<base_arg_ts, thread_pool<base_arg_ts...>&, std::size_t>...>
 {
 public:
@@ -222,18 +263,25 @@ public:
 
 template<class... base_arg_ts>
 thread_pool<base_arg_ts...>::thread_pool(std::size_t n_threads)
+	: detail::tuple_base_class<base_arg_ts...>({base_arg_ts{n_threads}...})
 {
 	this->threads.reserve(n_threads);
-	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
+	
+	detail::thread_constructor<thread_pool, std::tuple<base_arg_ts...>,
+		std::make_index_sequence<sizeof...(base_arg_ts)>>
+		constructor{*this, this->tup, this->threads};
+	
+	for (std::size_t tid = 0; tid < n_threads; ++tid)
 	{
-		this->threads.emplace_back(detail::worker_thread{},
-			this, base_arg_ts{}(*this, thread_id)...);
+		constructor.construct(tid);
 	}
 }
 
 template<std::integral id_t>
 struct thread_id
 {
+	explicit thread_id(std::size_t) {}
+	
 	template<class pool_t>
 	id_t operator()(pool_t&, std::size_t id) const
 	{

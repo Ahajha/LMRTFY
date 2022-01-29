@@ -146,32 +146,59 @@ TEST_CASE("ensure a reasonable spread of jobs across threads")
 	}
 }
 
-TEST_CASE("pass custom per-thread item constructor")
+TEST_CASE("thread ids should be consistent")
 {
-	constexpr auto construct = [](auto&, std::size_t id)
-	{
-		return std::vector<int>{static_cast<int>(id)};
-	};
-
-	lmrtfy::thread_pool<lmrtfy::thread_id<int>, decltype(construct)> pool;
+	// This is to test the template system a bit
+	lmrtfy::thread_pool<lmrtfy::thread_id<int>,
+	                    lmrtfy::thread_id<int>,
+	                    lmrtfy::thread_id<int>,
+	                    lmrtfy::thread_id<int>,
+	                    lmrtfy::thread_id<int>> pool;
 	
-	// This currently does not work as intented, objects have to be passed
-	// in by the *exact* type they are created as, here that is a
-	// std::vector<int>, no reference. A potential solution is to store
-	// a single instance of each base argument type, and that would allow
-	// these functions to return references.
-	/*
-	for (int i = 0; i < 100 * pool.size(); ++i)
+	for (int i = 0; i < 1000 * pool.size(); ++i)
 	{
-		pool.push([](std::size_t tid, std::vector<int> vec)
+		pool.push([](int id1, int id2, int id3, int id4, int id5)
 		{
-			CHECK(vec.size() <= 1);
-
-			if (vec.size() == 1)
-			{
-				CHECK(vec[0] == tid);
-			}
+			CHECK(id1 == id2);
+			CHECK(id1 == id3);
+			CHECK(id1 == id4);
+			CHECK(id1 == id5);
 		});
 	}
-	*/
+}
+
+struct construct
+{
+	std::vector<std::vector<int>> vecs;
+	
+	explicit construct(std::size_t n_threads) : vecs(n_threads) {}
+	
+	template<class pool>
+	auto operator()(pool&, std::size_t tid)
+	{
+		vecs[tid].push_back(static_cast<int>(tid));
+		return std::ref(vecs[tid]);
+	}
+
+};
+
+TEST_CASE("ensure lifetime of contained objects is not ended early")
+{
+	for (int i = 0; i < 100; ++i)
+	{
+		lmrtfy::thread_pool<lmrtfy::thread_id<int>, construct> pool;
+		
+		for (int i = 0; i < 10 * pool.size(); ++i)
+		{
+			pool.push([](int tid, std::vector<int>& vec)
+			{
+				CHECK(vec.size() == 1);
+
+				if (vec.size() == 1)
+				{
+					CHECK(vec[0] == tid);
+				}
+			});
+		}
+	}
 }
