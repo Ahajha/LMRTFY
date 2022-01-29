@@ -18,19 +18,12 @@
 namespace lmrtfy
 {
 
-enum class _pool_state : uint8_t
+namespace detail
+{
+
+enum class pool_state : uint8_t
 {
 	running, stopping, stopped
-};
-
-template<std::integral id_t>
-struct thread_id
-{
-	template<class pool_t>
-	id_t operator()(pool_t&, std::size_t id) const
-	{
-		return static_cast<id_t>(id);
-	}
 };
 
 /*
@@ -42,7 +35,7 @@ template<template<class> class task_queue_t, class... base_arg_ts>
 class thread_pool_base
 {
 public:
-	explicit thread_pool_base() : n_idle_(0), state(_pool_state::running) {}
+	explicit thread_pool_base() : n_idle_(0), state(pool_state::running) {}
 	
 	/*!
 	Waits for all tasks in the queue to be finished, then stops.
@@ -83,7 +76,7 @@ protected:
 	
 	// Initially set to running, set to stopping when the destructor is called, then set to
 	// stopped once all threads are idle and there is no more work to be done.
-	_pool_state state;
+	pool_state state;
 	
 	// Used for waking up threads when new tasks are available or the pool is stopping.
 	// Note that according to
@@ -98,27 +91,10 @@ protected:
 	// Queue of tasks to be completed.
 	task_queue_t<fu2::unique_function<void(base_arg_ts...)>> tasks;
 	
-	friend class _worker_thread;
+	friend class worker_thread;
 };
 
-/*!
-Thread pool class.
-Thread_id_t is used to determine the signature of callable objects it accepts. More
-information about this parameter in push().
-*/
-template<class... base_arg_ts>
-class thread_pool : public
-	thread_pool_base<std::queue, std::invoke_result_t<base_arg_ts, thread_pool<base_arg_ts...>&, std::size_t>...>
-{
-public:
-	/*!
-	Creates a thread pool with a given number of threads. Default attempts to use all threads
-	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
-	*/
-	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
-};
-
-struct _worker_thread
+struct worker_thread
 {
 	template<template<class> class task_queue_t, class... base_arg_ts>
 	void operator()(thread_pool_base<task_queue_t, base_arg_ts...>* pool, base_arg_ts... args) const
@@ -135,9 +111,9 @@ struct _worker_thread
 				
 				// If this was the last worker running and the pool is stopping, wake
 				// up all other threads, who are waiting for the others to finish.
-				if (pool->n_idle_ == pool->size() && pool->state == _pool_state::stopping)
+				if (pool->n_idle_ == pool->size() && pool->state == pool_state::stopping)
 				{
-					pool->state = _pool_state::stopped;
+					pool->state = pool_state::stopped;
 					
 					// Minor optimization, unlock now instead of having it release
 					// automatically. This also allows the notification to not require
@@ -152,7 +128,7 @@ struct _worker_thread
 				// or the threads are told to stop.
 				pool->signal.wait(mutex_lock);
 				
-				if (pool->state == _pool_state::stopped) return;
+				if (pool->state == pool_state::stopped) return;
 				
 				--pool->n_idle_;
 			}
@@ -171,17 +147,6 @@ struct _worker_thread
 		}
 	}
 };
-
-template<class... base_arg_ts>
-thread_pool<base_arg_ts...>::thread_pool(std::size_t n_threads)
-{
-	this->threads.reserve(n_threads);
-	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
-	{
-		this->threads.emplace_back(_worker_thread{},
-			this, base_arg_ts{}(*this, thread_id)...);
-	}
-}
 
 template<template<class> class task_queue_t, class... base_arg_ts>
 template<class f_t, class... arg_ts>
@@ -221,8 +186,8 @@ thread_pool_base<task_queue_t, base_arg_ts...>::~thread_pool_base()
 		std::lock_guard lock(this->mut);
 		
 		this->state = (this->n_idle_ == this->size() && this->tasks.empty())
-			? _pool_state::stopped
-			: _pool_state::stopping;
+			? pool_state::stopped
+			: pool_state::stopping;
 	}
 	
 	// Signal everyone in case any have gone to sleep.
@@ -236,4 +201,44 @@ thread_pool_base<task_queue_t, base_arg_ts...>::~thread_pool_base()
 	}
 }
 
+} // namespace detail
+
+/*!
+Thread pool class.
+Thread_id_t is used to determine the signature of callable objects it accepts. More
+information about this parameter in push().
+*/
+template<class... base_arg_ts>
+class thread_pool : public detail::thread_pool_base<std::queue,
+	std::invoke_result_t<base_arg_ts, thread_pool<base_arg_ts...>&, std::size_t>...>
+{
+public:
+	/*!
+	Creates a thread pool with a given number of threads. Default attempts to use all threads
+	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
+	*/
+	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
+};
+
+template<class... base_arg_ts>
+thread_pool<base_arg_ts...>::thread_pool(std::size_t n_threads)
+{
+	this->threads.reserve(n_threads);
+	for (std::size_t thread_id = 0; thread_id < n_threads; ++thread_id)
+	{
+		this->threads.emplace_back(detail::worker_thread{},
+			this, base_arg_ts{}(*this, thread_id)...);
+	}
 }
+
+template<std::integral id_t>
+struct thread_id
+{
+	template<class pool_t>
+	id_t operator()(pool_t&, std::size_t id) const
+	{
+		return static_cast<id_t>(id);
+	}
+};
+
+} // namespace lmrtfy
