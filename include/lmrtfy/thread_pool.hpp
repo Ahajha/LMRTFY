@@ -162,7 +162,7 @@ std::future<std::invoke_result_t<f_t, base_arg_ts..., arg_ts...>>
 	auto task = package_t([f = std::forward<f_t>(f), ... args = std::forward<arg_ts>(args)]
 		(base_arg_ts... base_args)
 		{
-			return f(base_args..., args...);
+			return std::invoke(f, base_args..., args...);
 		}
 	);
 	

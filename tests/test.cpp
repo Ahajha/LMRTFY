@@ -226,3 +226,16 @@ TEST_CASE("ensure reasonable task spread using per_thread")
 	
 	CHECK(n_lazy_workers == 0);
 }
+
+struct foo
+{
+	void bar() {}
+};
+
+TEST_CASE("pass member function as task")
+{
+	lmrtfy::thread_pool pool;
+	
+	auto f = foo{};
+	pool.push(&foo::bar, &f);
+}
