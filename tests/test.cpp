@@ -146,6 +146,31 @@ TEST_CASE("ensure a reasonable spread of jobs across threads")
 	}
 }
 
+TEST_CASE("ensure a reasonable spread of jobs across threads, using legacy syntax")
+{
+	constexpr auto expected_n_jobs_per_thread = 10000;
+	
+	std::vector<int> n_jobs_per_thread(std::thread::hardware_concurrency(), 0);
+	{
+	lmrtfy::thread_pool<int> pool;
+	
+	const auto total_jobs = pool.size() * expected_n_jobs_per_thread;
+	
+	for (int i = 0; i < total_jobs; ++i)
+	{
+		pool.push([&](int id){ ++n_jobs_per_thread[id]; });
+	}
+	}
+	
+	// We are very generous with the definition of "reasonable", we expect each
+	// thread to have half the number of expected jobs at a minimum.
+	// In practice it's usually above 80%.
+	for (int n_jobs : n_jobs_per_thread)
+	{
+		CHECK(n_jobs >= expected_n_jobs_per_thread / 2);
+	}
+}
+
 TEST_CASE("thread ids should be consistent")
 {
 	// This is to test the template system a bit

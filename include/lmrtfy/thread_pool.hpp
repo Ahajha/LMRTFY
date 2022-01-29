@@ -261,6 +261,22 @@ public:
 	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
 };
 
+/*!
+Specialization for support of the `lmrtfy::thread_pool<int>` type syntax.
+lmrtfy::thread_pool<lmrtfy::thread_id<int>> should be preferred, but existing code
+should still work.
+*/
+template<std::integral thread_id_t>
+class thread_pool<thread_id_t> : public detail::thread_pool_base<std::queue, thread_id_t>
+{
+public:
+	/*!
+	Creates a thread pool with a given number of threads. Default attempts to use all threads
+	on the given hardware, based on the implementation of std::thread::hardware_concurrency().
+	*/
+	explicit thread_pool(std::size_t n_threads = std::thread::hardware_concurrency());
+};
+
 template<class... base_arg_ts>
 thread_pool<base_arg_ts...>::thread_pool(std::size_t n_threads)
 	: detail::tuple_base_class<base_arg_ts...>({base_arg_ts{n_threads}...})
@@ -274,6 +290,18 @@ thread_pool<base_arg_ts...>::thread_pool(std::size_t n_threads)
 	for (std::size_t tid = 0; tid < n_threads; ++tid)
 	{
 		constructor.construct(tid);
+	}
+}
+
+template<std::integral thread_id_t>
+thread_pool<thread_id_t>::thread_pool(std::size_t n_threads)
+{
+	this->threads.reserve(n_threads);
+	
+	for (std::size_t tid = 0; tid < n_threads; ++tid)
+	{
+		this->threads.emplace_back(detail::worker_thread{},
+			this, static_cast<thread_id_t>(tid));
 	}
 }
 
