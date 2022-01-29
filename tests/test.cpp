@@ -239,3 +239,25 @@ TEST_CASE("pass member function as task")
 	auto f = foo{};
 	pool.push(&foo::bar, &f);
 }
+
+template<class pool>
+void recurse(pool& p, int level, std::atomic<int>& n_jobs)
+{
+	++n_jobs;
+	if (level > 0)
+	{
+		p.push(recurse<pool>, level - 1, std::ref(n_jobs));
+		p.push(recurse<pool>, level - 1, std::ref(n_jobs));
+	}
+}
+
+TEST_CASE("run recursive tasks")
+{
+	std::atomic<int> n_jobs = 0;
+	{
+	lmrtfy::thread_pool<lmrtfy::pool_ref> pool;
+	
+	pool.push(recurse<decltype(pool)>, 13, std::ref(n_jobs));
+	}
+	CHECK(n_jobs == 16383);
+}

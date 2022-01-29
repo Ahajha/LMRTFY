@@ -282,8 +282,8 @@ struct thread_id
 {
 	explicit thread_id(std::size_t) {}
 	
-	template<class pool_t>
-	id_t operator()(pool_t&, std::size_t id) const
+	template<class pool>
+	id_t operator()(pool&, std::size_t id) const
 	{
 		return static_cast<id_t>(id);
 	}
@@ -299,9 +299,23 @@ public:
 	template<class pool>
 	auto operator()(pool&, std::size_t tid)
 	{
+		// Cannot use raw reference, as it would not work in
+		// a std::thread.
 		return std::ref(vecs[tid]);
 	}
+};
 
+struct pool_ref
+{
+	explicit pool_ref(std::size_t) {}
+	
+	template<class pool>
+	auto operator()(pool& p, std::size_t)
+	{
+		// This struct does not need to worry about the lifetime of p,
+		// as p is the host pool.
+		return std::ref(p);
+	}
 };
 
 } // namespace lmrtfy
