@@ -202,3 +202,27 @@ TEST_CASE("ensure lifetime of contained objects is not ended early")
 		}
 	}
 }
+
+TEST_CASE("ensure reasonable task spread using per_thread")
+{
+	constexpr auto expected_n_jobs_per_thread = 10000;
+	
+	// Start by saying no workers have done any work
+	std::atomic<std::size_t> n_lazy_workers = std::thread::hardware_concurrency();
+	
+	{
+	lmrtfy::thread_pool<lmrtfy::per_thread<int>> pool;
+	
+	const auto total_jobs = pool.size() * expected_n_jobs_per_thread;
+	
+	for (int i = 0; i < total_jobs; ++i)
+	{
+		pool.push([&](int& n_completed_jobs){
+			if (++n_completed_jobs == expected_n_jobs_per_thread / 2)
+				--n_lazy_workers;
+		});
+	}
+	}
+	
+	CHECK(n_lazy_workers == 0);
+}

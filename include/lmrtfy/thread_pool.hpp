@@ -289,4 +289,19 @@ struct thread_id
 	}
 };
 
+template<class T>
+class per_thread
+{
+	std::vector<T> vecs;
+public:
+	explicit per_thread(std::size_t n_threads) : vecs(n_threads) {}
+	
+	template<class pool>
+	auto operator()(pool&, std::size_t tid)
+	{
+		return std::ref(vecs[tid]);
+	}
+
+};
+
 } // namespace lmrtfy
