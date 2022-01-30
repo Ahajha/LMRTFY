@@ -89,6 +89,17 @@ TEST_CASE("passing references to pool")
 	CHECK(x == 4);
 }
 
+TEST_CASE("pass raw references to pool")
+{
+	int x = 2;
+	{
+	lmrtfy::thread_pool pool;
+	
+	pool.push([](int& y) { y = 4; }, x);
+	}
+	CHECK(x == 2);
+}
+
 TEST_CASE("ensure all jobs from a large batch are run")
 {
 	std::atomic<int> n_jobs = 0;

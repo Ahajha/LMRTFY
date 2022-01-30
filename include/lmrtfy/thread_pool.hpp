@@ -63,6 +63,7 @@ public:
 	Pushes a function and its arguments to the task queue. Returns the
 	result as a future. f should take all specified base parameters,
 	followed by the parameters passed to push(), as its arguments.
+	Rvalue references are moved, lvalue references are copied.
 	*/
 	template<class f_t, class... arg_ts>
 		requires std::invocable<f_t, base_arg_ts..., arg_ts...>
@@ -160,7 +161,7 @@ std::future<std::invoke_result_t<f_t, base_arg_ts..., arg_ts...>>
 	>;
 	
 	auto task = package_t([f = std::forward<f_t>(f), ... args = std::forward<arg_ts>(args)]
-		(base_arg_ts... base_args)
+		(base_arg_ts... base_args) mutable
 		{
 			return std::invoke(f, base_args..., args...);
 		}
