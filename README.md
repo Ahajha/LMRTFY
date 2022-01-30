@@ -1,5 +1,5 @@
 # LMRTFY
-Let Me Run That For You: A C++17 Thread Pool Library
+Let Me Run That For You: A C++20 Thread Pool Library
 
 ## What is a Thread Pool?
 A thread pool is a container that keeps a set of internal threads, and dispatches tasks given to it to its threads, which are reused until the pool is destroyed. Thread pools aim to mostly eliminate the overhead of starting and stopping threads every time you want to run a task, lowering the overhead to just that of inserting and removing from the pool. They allow for simpler implementations of highly parallel algorithms.
@@ -139,3 +139,101 @@ int main()
   }
 }
 ```
+
+### New features in v0.2.0
+Version 0.2.0 is an update to C++20, using concepts universally, and adds more customization points. Thread pools can now accept extra template arguments specifying that extra parameters should be passed to each task. 3 built in parameter options are given:
+
+#### thread_id\<T>
+This specifies that the thread ID should be passed to each task, as a T. This is the previous example, but with thread_id.
+
+```C++
+#include "lmrtfy/thread_pool.hpp"
+
+int main()
+{
+  lmrtfy::thread_pool<lmrtfy::thread_id<std::size_t>> pool;
+  
+  std::vector<std::vector<int>> nums(pool.size());
+  
+  for (std::size_t i = 0; i < pool.size() * 100; ++i)
+  {
+    pool.push([&](std::size_t id, std::size_t i)
+    {
+      nums[id].push_back(i);
+    }, i);
+  }
+}
+```
+This is identical in functionality to the pre-0.2.0 syntax (thread_pool<T>). The previous is syntax is still supported (though more on that below).
+
+#### per_thread\<T>
+This specifies that each thread owns a T that is passed in. This the previous example, rewritten so that each vector is passed in directly instead of having to manually index an external vector:
+```C++
+#include "lmrtfy/thread_pool.hpp"
+
+int main()
+{
+  lmrtfy::thread_pool<lmrtfy::per_thread<std::vector<int>>> pool;
+  
+  for (std::size_t i = 0; i < pool.size() * 100; ++i)
+  {
+    pool.push([&](std::vector<int>& nums, std::size_t i)
+    {
+      nums.push_back(i);
+    }, i);
+  }
+}
+```
+
+#### pool_ref
+This is a convenience/minor performance option designed for recursive tasks. Each task will be passed a reference to the pool it is running in. This avoids the need for the pool to be global or passed in manually.
+```C++
+#include <iostream>
+#include "lmrtfy/thread_pool.hpp"
+
+// An alias may be useful here as to not require your task to be templated
+using pool_t = lmrtfy::thread_pool<lmrtfy::pool_ref> pool;
+  
+void recurse(pool_t& pool, int level)
+{
+  if (level < 4)
+  {
+    pool.push(recurse, level + 1);
+    pool.push(recurse, level + 1);
+  }
+  
+  static std::mutex io_mut;
+  std::lock_guard lock(io_mut);
+  std::cout << "Level " << level << '\n';
+}
+
+int main()
+{
+  pool_t pool;
+  
+  pool.push(recurse, 0);
+}
+```
+
+#### Multiple objects
+Any number of these objects can be mixed and matched, just pass them in in the order they should be passed to the tasks. For example,
+```C++
+lmrtfy::thread_pool<lmrtfy::pool_ref, lmrtfy::per_thread<std::array<int, 10>>> pool;
+```
+passes a reference to the host pool and a `std::array<int, 10>&` to each task.
+
+Note: Pre-0.2.0 syntax (thread_pool<int>) cannot be mixed with other objects, if multiple objects are used they must all use the new syntax.
+
+#### Custom objects
+If none of these built-in objects suit your needs, custom ones can be created. They just need to follow the following structure:
+```C++
+struct name
+{
+  explicit name(std::size_t n_threads) { ... }
+  
+  template<pool_t>
+  auto operator()(pool_t& pool, std::size_t thread_id) { ... }
+};
+```
+where `name` is the name of the custom object. This can then be passed into a `thread_pool`'s template argument list like any other.
+Some small considerations to make on these is that the pool is not fully constructed when passed in, so some methods (like pool.n_threads()) may not work properly. Also, raw references cannot be used due to having to pass them as rvalue refs into threads, this can be easily avoided by returning `std::reference_wrapper`s to the object you want (you can simply write `return std::ref(thing_to_return)`).
