@@ -11,3 +11,9 @@ add_executable(tests test.cpp)
 target_link_libraries(tests PUBLIC lmrtfy doctest)
 
 target_compile_features(tests PRIVATE cxx_std_17)
+
+if (MSVC)
+	add_definitions(/W4 /WX)
+else()
+	add_definitions(-Wall -Wextra -Wshadow -Wpedantic -Werror)
+endif()

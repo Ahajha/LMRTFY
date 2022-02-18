@@ -218,8 +218,9 @@ struct thread_constructor<pool, tuple, std::integer_sequence<std::size_t, idxs..
 	tuple& tup;
 	std::vector<std::thread>& threads;
 	
-	void construct(std::size_t tid) const
+	void construct([[maybe_unused]] std::size_t tid) const
     {
+    	// tid is unused when sizeof...(idxs) == 0
         threads.emplace_back(worker_thread{}, &p, (std::get<idxs>(tup)(p, tid))...);
     }
 };

@@ -142,7 +142,7 @@ TEST_CASE("ensure a reasonable spread of jobs across threads")
 	
 	const auto total_jobs = pool.size() * expected_n_jobs_per_thread;
 	
-	for (int i = 0; i < total_jobs; ++i)
+	for (std::size_t i = 0; i < total_jobs; ++i)
 	{
 		pool.push([&](int id){ ++n_jobs_per_thread[id]; });
 	}
@@ -167,7 +167,7 @@ TEST_CASE("ensure a reasonable spread of jobs across threads, using legacy synta
 	
 	const auto total_jobs = pool.size() * expected_n_jobs_per_thread;
 	
-	for (int i = 0; i < total_jobs; ++i)
+	for (std::size_t i = 0; i < total_jobs; ++i)
 	{
 		pool.push([&](int id){ ++n_jobs_per_thread[id]; });
 	}
@@ -191,7 +191,7 @@ TEST_CASE("thread ids should be consistent")
 	                    lmrtfy::thread_id<int>,
 	                    lmrtfy::thread_id<int>> pool;
 	
-	for (int i = 0; i < 1000 * pool.size(); ++i)
+	for (std::size_t i = 0; i < 1000 * pool.size(); ++i)
 	{
 		pool.push([](int id1, int id2, int id3, int id4, int id5)
 		{
@@ -224,7 +224,7 @@ TEST_CASE("ensure lifetime of contained objects is not ended early")
 	{
 		lmrtfy::thread_pool<lmrtfy::thread_id<int>, construct> pool;
 		
-		for (int i = 0; i < 10 * pool.size(); ++i)
+		for (std::size_t j = 0; j < 10 * pool.size(); ++j)
 		{
 			pool.push([](int tid, std::vector<int>& vec)
 			{
@@ -251,7 +251,7 @@ TEST_CASE("ensure reasonable task spread using per_thread")
 	
 	const auto total_jobs = pool.size() * expected_n_jobs_per_thread;
 	
-	for (int i = 0; i < total_jobs; ++i)
+	for (std::size_t i = 0; i < total_jobs; ++i)
 	{
 		pool.push([&](int& n_completed_jobs){
 			if (++n_completed_jobs == expected_n_jobs_per_thread / 2)
